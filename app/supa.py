@@ -57,3 +57,28 @@ def list_recent_exports(client: Client, limit: int = 20) -> List[Dict[str, Any]]
     return res.data or []
 
 
+def count_existing_messages_by_ids(client: Client, message_ids: List[str]) -> int:
+    if not message_ids:
+        return 0
+    # Supabase may limit IN list size; chunk to be safe
+    chunk_size = 800
+    total = 0
+    for i in range(0, len(message_ids), chunk_size):
+        chunk = message_ids[i : i + chunk_size]
+        res = (
+            client.table("messages")
+            .select("message_id", count="exact")
+            .in_("message_id", chunk)
+            .execute()
+        )
+        try:
+            if isinstance(getattr(res, "count", None), int):
+                total += res.count
+            else:
+                data = getattr(res, "data", None)
+                total += len(data) if isinstance(data, list) else 0
+        except Exception:
+            pass
+    return total
+
+

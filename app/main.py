@@ -128,19 +128,22 @@ def run_job(job_id: str, payload: ExportCreate) -> None:
 
         # Insert rows (ignore duplicates by message_id)
         supa.insert_messages(client, rows)
-        # Count rows actually inserted for this job
-        inserted_count = supa.count_messages_for_job(client, job_id)
+        # Compute integrity considering pre-existing messages in DB
+        existing = supa.count_existing_messages_by_ids(client, [r["message_id"] for r in rows])
+        inserted_count = len(rows)  # requested
+        message_count = len(rows)   # exported
+        effective_inserted = message_count - existing
         duration_ms = int((time.time() - start_ms) * 1000)
-        if inserted_count != len(rows):
+        if effective_inserted != message_count:
             supa.update_export(
                 client,
                 job_id,
                 {
                     "status": "failed",
-                    "message_count": len(rows),
-                    "inserted_count": inserted_count,
+                    "message_count": message_count,
+                    "inserted_count": effective_inserted,
                     "duration_ms": duration_ms,
-                    "error": "integrity_mismatch",
+                    "error": "integrity_mismatch (duplicates pre-existed)",
                 },
             )
         else:
@@ -149,8 +152,8 @@ def run_job(job_id: str, payload: ExportCreate) -> None:
                 job_id,
                 {
                     "status": "completed",
-                    "message_count": len(rows),
-                    "inserted_count": inserted_count,
+                    "message_count": message_count,
+                    "inserted_count": effective_inserted,
                     "duration_ms": duration_ms,
                     "error": None,
                 },
