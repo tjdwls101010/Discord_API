@@ -1,0 +1,10 @@
+# Local environment
+.env
+.mcp.json
+
+# macOS
+.DS_Store
+
+# Editor/AI specific (keep local)
+.cursor/
+.claude/
