@@ -19,17 +19,17 @@
 ---
 
 ## 가장 쉬운 사용법(바로 복붙)
-아래에서 `YOUR_SERVICE_URL`을 실제 배포 주소로 바꾸세요. (예: `https://discord-api-fmwa.onrender.com`)
+아래는 실제 배포 주소를 그대로 사용합니다: `https://discord-api-fmwa.onrender.com`
 
 1) 서비스가 살아있는지 확인
 ```bash
-curl YOUR_SERVICE_URL/health
+curl https://discord-api-fmwa.onrender.com/health
 # 기대 응답: {"ok": true}
 ```
 
 2) 메시지 수집 요청하기(예: 한국시간 2025-08-05 22:30 ~ 23:30)
 ```bash
-curl -X POST YOUR_SERVICE_URL/exports \
+curl -X POST https://discord-api-fmwa.onrender.com/exports \
   -H 'Content-Type: application/json' \
   -d '{
     "start_at": "2025-08-05T22:30:00",
@@ -41,25 +41,17 @@ curl -X POST YOUR_SERVICE_URL/exports \
 
 3) 작업 상태 확인하기
 ```bash
-curl YOUR_SERVICE_URL/exports/<위에서 받은 job_id>
-# 예시 응답:
-# {
-#   "job_id": "...",
-#   "status": "pending | running | completed | failed",
-#   "message_count": 98,
-#   "inserted_count": 98,
-#   "error": null
-# }
+curl https://discord-api-fmwa.onrender.com/exports/<여기에_받은_job_id_붙이기>
 ```
 
 4) 최근 작업 목록 보기(선택)
 ```bash
-curl YOUR_SERVICE_URL/status
+curl https://discord-api-fmwa.onrender.com/status
 ```
 
 5) 서비스 메트릭 보기(선택)
 ```bash
-curl YOUR_SERVICE_URL/metrics
+curl https://discord-api-fmwa.onrender.com/metrics
 ```
 
 ---
@@ -94,7 +86,7 @@ curl YOUR_SERVICE_URL/metrics
 
 예시(UTC로 직접 보낼 때)
 ```bash
-curl -X POST YOUR_SERVICE_URL/exports \
+curl -X POST https://discord-api-fmwa.onrender.com/exports \
   -H 'Content-Type: application/json' \
   -d '{
     "start_at": "2025-08-05T13:30:00Z",
@@ -174,17 +166,118 @@ docker run --rm --platform=linux/amd64 -p 8000:8000 \
 
 ---
 
-## 보안 주의사항
-- 토큰·키 등 비밀값은 절대 저장소에 커밋하지 마세요(.env만 사용).
-- Render/Supabase 대시보드에 환경변수로 등록하세요.
-- 로그에 원시 토큰은 출력되지 않도록 마스킹 처리되어 있습니다.
-
----
-
 ## 문제 해결 팁
 - `Authentication token is invalid` → 토큰이 잘못되었거나 권한이 부족합니다.
 - `integrity_mismatch (duplicates pre-existed)` → 같은 기간에 이미 저장된 메시지들이 있습니다.
 - 처음 요청이 느리다(특히 Free 플랜) → 인스턴스가 절전 상태에서 깨어나는 중일 수 있습니다.
+
+---
+
+## 상황별 예시(복붙)
+
+- 한국시간(KST) 구간 요청(예: 22:30~23:30)
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00",
+    "end_at":   "2025-08-05T23:30:00",
+    "timezone":  "Asia/Seoul"
+  }'
+```
+
+- UTC 구간 요청(예: 13:30Z~20:30Z)
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T13:30:00Z",
+    "end_at":   "2025-08-05T20:30:00Z"
+  }'
+```
+
+- 시간대 오프셋을 직접 포함(+09:00)
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00+09:00",
+    "end_at":   "2025-08-06T05:30:00+09:00"
+  }'
+```
+
+- 긴 구간(예: 22:30~다음날 05:30, 한국시간)
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00",
+    "end_at":   "2025-08-06T05:30:00",
+    "timezone":  "Asia/Seoul"
+  }'
+```
+
+- 필터 사용(작성자 기준)
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00",
+    "end_at":   "2025-08-05T23:30:00",
+    "timezone":  "Asia/Seoul",
+    "filter":    "from:YourName"
+  }'
+```
+
+- 필터 사용(이미지 포함 메시지만)
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00",
+    "end_at":   "2025-08-05T23:30:00",
+    "timezone":  "Asia/Seoul",
+    "filter":    "has:image"
+  }'
+```
+
+- 미디어 다운로드 포함(첨부/아바타 등) — 용량 증가 주의
+```bash
+curl -sS -X POST https://discord-api-fmwa.onrender.com/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00",
+    "end_at":   "2025-08-05T23:30:00",
+    "timezone":  "Asia/Seoul",
+    "media": true
+  }'
+```
+
+- 작업 상태 폴링(리눅스/맥; jq 설치 시)
+```bash
+JOB=$(curl -sS -X POST https://discord-api-fmwa.onrender.com/exports -H 'Content-Type: application/json' \
+  -d '{"start_at":"2025-08-05T22:30:00","end_at":"2025-08-05T23:30:00","timezone":"Asia/Seoul"}' | jq -r .job_id)
+for i in $(seq 1 10); do curl -sS https://discord-api-fmwa.onrender.com/exports/$JOB; echo; sleep 3; done
+```
+
+- 작업 상태 단건 조회(복사한 job_id 사용)
+```bash
+curl -sS https://discord-api-fmwa.onrender.com/exports/<job_id>
+```
+
+- 최근 작업 N개(예: 10개)
+```bash
+curl -sS "https://discord-api-fmwa.onrender.com/status?limit=10"
+```
+
+- 헬스/메트릭 빠른 점검
+```bash
+curl -sS https://discord-api-fmwa.onrender.com/health && echo && curl -sS https://discord-api-fmwa.onrender.com/metrics | head -n 8
+```
+
+주의
+- DiscordChatExporter 규칙: 시작 시간은 포함, 종료 시간은 제외.
+- 레이트리밋: 기본 1분당 10회. 429가 나오면 잠시 후 재시도하세요.
 
 ---
 
