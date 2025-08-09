@@ -1,3 +1,16 @@
+# env & secrets
+.env
+.env.*
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# OS
+.DS_Store
 # Local environment
 .env
 .mcp.json
