@@ -1,102 +1,192 @@
-이 프로젝트는 [`EasyNext`](https://github.com/easynext/easynext)를 사용해 생성된 [Next.js](https://nextjs.org) 프로젝트입니다.
+# Discord 메시지 아카이빙 API (비개발자용 가이드)
 
-## Getting Started
+이 서비스는 지정된 디스코드 채널의 특정 시간 구간 메시지를 내보내어 Supabase(Postgres)에 저장하는 간단한 API입니다. 내부적으로 DiscordChatExporter(CLI)를 사용합니다.
 
-개발 서버를 실행합니다.<br/>
-환경에 따른 명령어를 사용해주세요.
+- 배포 예시(URL): `https://discord-api-fmwa.onrender.com`
+- 이 문서는 “사용자 입장”에서 최대한 쉽게, 단계별로 설명합니다.
 
+---
+
+## 무엇을 할 수 있나요?
+- 시작 시간과 종료 시간을 보내면, 그 시간대의 디스코드 채널 메시지를 가져와 데이터베이스에 저장합니다.
+- 작업 상태를 조회해 수집이 끝났는지 확인할 수 있습니다.
+
+참고 사항
+- 채널은 운영자가 환경변수로 고정해 둡니다. 사용자가 임의로 바꿀 수 없습니다.
+- 저장되는 시간(`timestamp`)은 항상 UTC(세계 표준시)입니다.
+- API 요청 시 한국시간(Asia/Seoul) 기준으로 보낼 수도 있습니다.
+
+---
+
+## 가장 쉬운 사용법(바로 복붙)
+아래에서 `YOUR_SERVICE_URL`을 실제 배포 주소로 바꾸세요. (예: `https://discord-api-fmwa.onrender.com`)
+
+1) 서비스가 살아있는지 확인
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+curl YOUR_SERVICE_URL/health
+# 기대 응답: {"ok": true}
 ```
 
-브라우저에서 [http://localhost:3000](http://localhost:3000)을 열어 결과를 확인할 수 있습니다.
-
-`app/page.tsx` 파일을 수정하여 페이지를 편집할 수 있습니다. 파일을 수정하면 자동으로 페이지가 업데이트됩니다.
-
-## 기본 포함 라이브러리
-
-- [Next.js](https://nextjs.org)
-- [React](https://react.dev)
-- [Tailwind CSS](https://tailwindcss.com)
-- [TypeScript](https://www.typescriptlang.org)
-- [ESLint](https://eslint.org)
-- [Prettier](https://prettier.io)
-- [Shadcn UI](https://ui.shadcn.com)
-- [Lucide Icon](https://lucide.dev)
-- [date-fns](https://date-fns.org)
-- [react-use](https://github.com/streamich/react-use)
-- [es-toolkit](https://github.com/toss/es-toolkit)
-- [Zod](https://zod.dev)
-- [React Query](https://tanstack.com/query/latest)
-- [React Hook Form](https://react-hook-form.com)
-- [TS Pattern](https://github.com/gvergnaud/ts-pattern)
-
-## 사용 가능한 명령어
-
-한글버전 사용
-
-```sh
-easynext lang ko
+2) 메시지 수집 요청하기(예: 한국시간 2025-08-05 22:30 ~ 23:30)
+```bash
+curl -X POST YOUR_SERVICE_URL/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T22:30:00",
+    "end_at":   "2025-08-05T23:30:00",
+    "timezone":  "Asia/Seoul"
+  }'
+# 기대 응답: {"job_id": "..."}
 ```
 
-최신버전으로 업데이트
-
-```sh
-npm i -g @easynext/cli@latest
-# or
-yarn add -g @easynext/cli@latest
-# or
-pnpm add -g @easynext/cli@latest
+3) 작업 상태 확인하기
+```bash
+curl YOUR_SERVICE_URL/exports/<위에서 받은 job_id>
+# 예시 응답:
+# {
+#   "job_id": "...",
+#   "status": "pending | running | completed | failed",
+#   "message_count": 98,
+#   "inserted_count": 98,
+#   "error": null
+# }
 ```
 
-Supabase 설정
-
-```sh
-easynext supabase
+4) 최근 작업 목록 보기(선택)
+```bash
+curl YOUR_SERVICE_URL/status
 ```
 
-Next-Auth 설정
-
-```sh
-easynext auth
-
-# ID,PW 로그인
-easynext auth idpw
-# 카카오 로그인
-easynext auth kakao
+5) 서비스 메트릭 보기(선택)
+```bash
+curl YOUR_SERVICE_URL/metrics
 ```
 
-유용한 서비스 연동
+---
 
-```sh
-# Google Analytics
-easynext gtag
+## 시간·타임존 안내(중요)
+- 입력 필드
+  - `start_at`, `end_at`: 시간 문자열(ISO 8601 형식)
+  - `timezone`: 선택값(예: `Asia/Seoul`). `start_at`/`end_at`에 시간대 표기가 없으면 이 값으로 해석합니다.
+- 내부 동작
+  - API는 받은 시간을 UTC로 변환해 처리합니다.
+  - 저장되는 `timestamp` 컬럼도 UTC 입니다(한국시간 아님).
+- DiscordChatExporter 규칙
+  - `--after`(시작 시간)는 “포함”, `--before`(종료 시간)는 “제외”입니다.
 
-# Microsoft Clarity
-easynext clarity
+예) `2025-08-05 22:30~23:30 Asia/Seoul`로 보내면 내부적으로 `2025-08-05T13:30:00Z ~ 20:30:00Z(UTC)`로 변환됩니다.
 
-# ChannelIO
-easynext channelio
+---
 
-# Sentry
-easynext sentry
+## API 요약
 
-# Google Adsense
-easynext adsense
+### POST /exports
+- 설명: 메시지 수집 작업을 비동기로 시작합니다.
+- 요청(JSON)
+  - `start_at`: string, 필수
+  - `end_at`: string, 필수
+  - `timezone`: string, 선택(기본 `UTC`). 예: `Asia/Seoul`
+  - `format`: string, 선택(기본 `Json`). 현재는 `Json`만 지원
+  - `media`: boolean, 선택(기본 false)
+  - `filter`: string, 선택(DiscordChatExporter의 필터 구문)
+- 응답
+  - 202 Accepted `{ "job_id": "uuid" }`
+
+예시(UTC로 직접 보낼 때)
+```bash
+curl -X POST YOUR_SERVICE_URL/exports \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "start_at": "2025-08-05T13:30:00Z",
+    "end_at":   "2025-08-05T20:30:00Z"
+  }'
 ```
 
-## Microsoft Clarity 사용법
+### GET /exports/{job_id}
+- 설명: 특정 작업의 상태를 조회합니다.
+- 응답 예시
+```json
+{
+  "job_id": "...",
+  "status": "completed",
+  "message_count": 98,
+  "inserted_count": 98,
+  "duration_ms": 45897,
+  "error": null
+}
+```
 
-이 프로젝트는 Microsoft Clarity가 설정되어 있습니다. 프로젝트 ID: `summarize`
+상태 값
+- `pending`: 대기 중
+- `running`: 수집/저장 중
+- `completed`: 완료
+- `failed`: 실패(에러 메시지 `error` 필드 참고)
 
-Microsoft Clarity는 사용자 행동 분석 도구로, 별도의 코드 없이 자동으로 사용자 세션을 기록하고 히트맵, 세션 재생 등의 기능을 제공합니다.
+특이 케이스: 같은 기간을 여러 번 재수집하면, 이미 저장된 메시지가 있어 `inserted_count`가 0이 될 수 있습니다. 현 설정에서는 “신규 삽입 수와 총 수집 메시지 수가 다르면 failed”로 표기될 수 있습니다(운영 정책에 따라 변경 가능).
 
-Clarity 컴포넌트는 `src/third-parties/Clarity.tsx`에 위치하며, `layout.tsx`에 자동으로 추가되었습니다.
+### GET /status
+- 설명: 최근 작업 목록을 반환합니다.
 
-자세한 내용은 [Microsoft Clarity 공식 문서](https://docs.microsoft.com/en-us/clarity/setup-and-installation/clarity-setup)를 참조하세요.
+### GET /health
+- 설명: 헬스 체크 엔드포인트(단순 OK)
+
+### GET /metrics
+- 설명: 기본 메트릭(Prometheus 텍스트)
+
+---
+
+## 자주 묻는 질문(FAQ)
+- Q. 채널 ID만 필요한가요? 서버 ID는요?
+  - A. 단일 채널 내보내기는 채널 ID만 있으면 됩니다. 채널 ID는 전역 고유이며, DiscordChatExporter가 서버를 유추합니다.
+- Q. 왜 `inserted_count`가 0인데 failed가 나오죠?
+  - A. 같은 기간을 재수집하면 DB에 이미 메시지가 있어서 새로 삽입된 건수가 0일 수 있습니다. 현 정책상 “무결성”을 엄격히 적용하여 failed로 표기합니다. 필요 시 정책을 완화할 수 있습니다.
+- Q. 0건이 나올 때가 있어요.
+  - A. 해당 시간대 실제 메시지가 없거나, 토큰/권한/채널 설정 문제일 수 있습니다. 최근 시간대로 좁혀 테스트해보세요.
+- Q. 한국시간으로 보낼 수 있나요?
+  - A. 네, `timezone: "Asia/Seoul"`을 함께 보내면 됩니다.
+
+---
+
+## 유지보수자(운영자)용: 로컬 실행 방법(선택)
+로컬에서 Docker로 실행하려면(Apple Silicon 포함):
+```bash
+# 빌드
+docker build --platform=linux/amd64 -t discord-archiver:dev .
+
+# 환경변수 설정 후 실행(절대 키를 커밋하지 마세요)
+export DISCORD_TOKEN=... \
+       SUPABASE_URL=... \
+       SUPABASE_KEY=... \
+       DEFAULT_CHANNEL_ID=...
+
+docker run --rm --platform=linux/amd64 -p 8000:8000 \
+  -e DISCORD_TOKEN -e SUPABASE_URL -e SUPABASE_KEY -e DEFAULT_CHANNEL_ID \
+  discord-archiver:dev
+```
+- 실행 후 브라우저: `http://localhost:8000/health`
+
+필수 환경변수
+- `DISCORD_TOKEN`: 디스코드 토큰(유저 또는 봇)
+- `SUPABASE_URL`, `SUPABASE_KEY`: Supabase 프로젝트 정보
+- `DEFAULT_CHANNEL_ID`: 수집 대상 채널 ID
+- (선택) `DEFAULT_SERVER_ID`: 참고용
+- (봇 토큰일 경우) `DISCORD_IS_BOT=true` 설정 시 자동으로 `Bot <token>` 형태로 호출합니다.
+
+---
+
+## 보안 주의사항
+- 토큰·키 등 비밀값은 절대 저장소에 커밋하지 마세요(.env만 사용).
+- Render/Supabase 대시보드에 환경변수로 등록하세요.
+- 로그에 원시 토큰은 출력되지 않도록 마스킹 처리되어 있습니다.
+
+---
+
+## 문제 해결 팁
+- `Authentication token is invalid` → 토큰이 잘못되었거나 권한이 부족합니다.
+- `integrity_mismatch (duplicates pre-existed)` → 같은 기간에 이미 저장된 메시지들이 있습니다.
+- 처음 요청이 느리다(특히 Free 플랜) → 인스턴스가 절전 상태에서 깨어나는 중일 수 있습니다.
+
+---
+
+## 문의
+문서로 해결되지 않는 문제가 있다면 이 저장소 이슈 또는 운영자에게 문의해주세요.
