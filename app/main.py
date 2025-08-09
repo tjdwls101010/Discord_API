@@ -2,6 +2,7 @@ import os
 import time
 import uuid
 from datetime import timezone
+from zoneinfo import ZoneInfo
 from typing import Optional
 
 from dateutil.parser import isoparse
@@ -18,6 +19,7 @@ class ExportCreate(BaseModel):
     format: Optional[str] = "Json"
     media: Optional[bool] = False
     filter: Optional[str] = None
+    timezone: Optional[str] = "UTC"  # e.g., "Asia/Seoul"
 
     @field_validator("format")
     @classmethod
@@ -29,24 +31,37 @@ class ExportCreate(BaseModel):
             raise ValueError("invalid format")
         return v
 
-    @field_validator("start_at", "end_at")
-    @classmethod
-    def validate_iso8601_utc(cls, v: str) -> str:
-        try:
-            dt = isoparse(v)
-        except Exception:
-            raise ValueError("must be ISO8601")
-        if dt.tzinfo is None:
-            raise ValueError("timezone required (UTC)")
-        # Normalize to UTC Z
-        return dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-
     @model_validator(mode="after")
     def validate_range(self):
-        s = isoparse(self.start_at)
-        e = isoparse(self.end_at)
+        # Parse with support for explicit tz or provided timezone (default UTC)
+        try:
+            s_dt = isoparse(self.start_at)
+        except Exception:
+            raise ValueError("start_at must be ISO8601")
+        try:
+            e_dt = isoparse(self.end_at)
+        except Exception:
+            raise ValueError("end_at must be ISO8601")
+
+        tz_name = self.timezone or "UTC"
+        try:
+            tz_obj = ZoneInfo(tz_name)
+        except Exception:
+            raise ValueError("invalid timezone")
+
+        if s_dt.tzinfo is None:
+            s_dt = s_dt.replace(tzinfo=tz_obj)
+        if e_dt.tzinfo is None:
+            e_dt = e_dt.replace(tzinfo=tz_obj)
+
+        s = s_dt.astimezone(timezone.utc)
+        e = e_dt.astimezone(timezone.utc)
+
         if not (s < e):
             raise ValueError("start_at must be before end_at")
+        # Normalize stored strings to UTC Z
+        self.start_at = s.strftime("%Y-%m-%dT%H:%M:%SZ")
+        self.end_at = e.strftime("%Y-%m-%dT%H:%M:%SZ")
         return self
 
 
