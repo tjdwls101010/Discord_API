@@ -35,11 +35,16 @@ def export_json(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         out_file = os.path.join(tmpdir, "out.json")
+        # Optional: treat provided token as bot token when configured
+        token_value = token
+        if os.environ.get("DISCORD_IS_BOT", "").lower() in {"1", "true", "yes"}:
+            if not token_value.startswith("Bot "):
+                token_value = f"Bot {token_value}"
         cmd: List[str] = [
             DCE_BIN,
             "export",
             "-t",
-            token,
+            token_value,
             "-c",
             channel_id,
             "--after",
@@ -57,7 +62,7 @@ def export_json(
             cmd.extend(["--filter", filter_expr])
 
         # Do not print raw token in logs
-        safe_cmd = [w if w != token else _mask(token) for w in cmd]
+        safe_cmd = [w if w != token_value else _mask(token_value) for w in cmd]
         print({"dce_cmd": safe_cmd})
 
         proc = subprocess.run(
