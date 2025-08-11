@@ -6,7 +6,7 @@ from zoneinfo import ZoneInfo
 from typing import Optional
 
 from dateutil.parser import isoparse
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator, model_validator
 
@@ -187,7 +187,12 @@ def run_job(job_id: str, payload: ExportCreate) -> None:
 
 
 @app.post("/exports", status_code=202)
-def create_export(req: ExportCreate, bg: BackgroundTasks):
+def create_export(
+    req: ExportCreate,
+    bg: BackgroundTasks,
+    wait: bool = Query(False, description="완료까지 대기할지 여부"),
+    timeout: int = Query(60, ge=1, le=600, description="대기 초(기본 60초)"),
+):
     metrics.inc_http_requests()
     if not metrics.allow_export_now():
         raise HTTPException(status_code=429, detail="rate_limited")
@@ -214,6 +219,19 @@ def create_export(req: ExportCreate, bg: BackgroundTasks):
     )
     bg.add_task(run_job, job_id, req)
     metrics.inc_exports()
+
+    if not wait:
+        return {"job_id": job_id}
+
+    # 완료까지 대기(최대 timeout초)
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        data = supa.get_export(client, job_id)
+        if data and data.get("status") in ("completed", "failed"):
+            return data
+        time.sleep(1)
+
+    # 타임아웃 시 기존 모델대로 job_id만 반환
     return {"job_id": job_id}
 
 
