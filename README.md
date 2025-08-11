@@ -281,5 +281,210 @@ curl -sS https://discord-api-fmwa.onrender.com/health && echo && curl -sS https:
 
 ---
 
+## 프론트엔드 연동 가이드(Next.js 예시)
+
+### 핵심 요약
+- 버튼 한 번에 결과까지 받고 싶다면: `POST /exports?wait=true&timeout=60`
+- 백그라운드로 돌리고 싶다면: `POST /exports` → 반환된 `job_id`로 `GET /exports/{job_id}`를 폴링
+
+### 사전 설치
+```bash
+npm i @tanstack/react-query
+# (선택) 스키마 검증을 원하면
+npm i zod
+```
+
+### 환경변수(.env.local)
+```bash
+NEXT_PUBLIC_ARCHIVER_URL=https://discord-api-fmwa.onrender.com
+```
+
+### 공통 API 클라이언트
+```ts:src/features/exports/api.ts
+export const SERVICE_URL = process.env.NEXT_PUBLIC_ARCHIVER_URL ?? 'https://discord-api-fmwa.onrender.com';
+
+export type ExportRequest = {
+  start_at: string;   // ISO8601
+  end_at: string;     // ISO8601
+  timezone?: string;  // 예: 'Asia/Seoul'
+  format?: 'Json';
+  media?: boolean;
+  filter?: string;
+};
+
+export type ExportJob = {
+  job_id: string;
+  status?: 'pending' | 'running' | 'completed' | 'failed';
+  message_count?: number;
+  inserted_count?: number;
+  duration_ms?: number;
+  error?: string | null;
+};
+
+export async function createExport(req: ExportRequest): Promise<{ job_id: string }> {
+  const res = await fetch(`${SERVICE_URL}/exports`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error((await res.text()) || 'request_failed');
+  return res.json();
+}
+
+export async function createExportAndWait(req: ExportRequest, timeoutSec = 60): Promise<ExportJob> {
+  const url = `${SERVICE_URL}/exports?wait=true&timeout=${timeoutSec}`;
+  const res = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) throw new Error((await res.text()) || 'request_failed');
+  return res.json();
+}
+
+export async function getExportStatus(jobId: string): Promise<ExportJob> {
+  const res = await fetch(`${SERVICE_URL}/exports/${jobId}`, { cache: 'no-store' });
+  if (!res.ok) throw new Error((await res.text()) || 'status_failed');
+  return res.json();
+}
+```
+
+### React Query Provider 설정
+```tsx:src/app/providers.tsx
+'use client'
+
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { useState } from 'react';
+
+export function Providers({ children }: { children: React.ReactNode }) {
+  const [client] = useState(() => new QueryClient());
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+```
+
+```tsx:src/app/layout.tsx
+import type { Metadata } from 'next';
+import { Providers } from './providers';
+
+export const metadata: Metadata = { title: 'Discord Archiver' };
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="ko">
+      <body>
+        <Providers>{children}</Providers>
+      </body>
+    </html>
+  );
+}
+```
+
+### 패턴 A) 버튼 한 번으로 완료까지 대기(wait=true)
+```tsx:src/features/exports/components/ExportButtonWait.tsx
+'use client'
+
+import { useMutation } from '@tanstack/react-query';
+import { createExportAndWait } from '../api';
+
+export function ExportButtonWait() {
+  const { mutateAsync, isPending, data, error } = useMutation({
+    mutationFn: () =>
+      createExportAndWait({
+        start_at: '2025-08-05T22:30:00',
+        end_at: '2025-08-05T23:30:00',
+        timezone: 'Asia/Seoul',
+      }, 60),
+  });
+
+  return (
+    <div>
+      <button onClick={() => mutateAsync()} disabled={isPending}>
+        {isPending ? '작업 중…' : '메시지 수집(대기)'}
+      </button>
+      {data && (
+        <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(data, null, 2)}</pre>
+      )}
+      {error && <p style={{ color: 'red' }}>{String(error)}</p>}
+    </div>
+  );
+}
+```
+
+설명
+- 성공 시: `status: completed`
+- 중복 존재 시: 정책상 `failed`가 될 수 있습니다(예: `integrity_mismatch`). 데이터는 이미 존재하여 신규 삽입이 0건일 수 있습니다.
+
+### 패턴 B) 비동기 실행 + 폴링
+```tsx:src/features/exports/components/ExportFlowPolling.tsx
+'use client'
+
+import { useMutation, useQuery } from '@tanstack/react-query';
+import { createExport, getExportStatus } from '../api';
+import { useState } from 'react';
+
+export function ExportFlowPolling() {
+  const [jobId, setJobId] = useState<string | null>(null);
+
+  const createMut = useMutation({
+    mutationFn: () =>
+      createExport({
+        start_at: '2025-08-05T22:30:00',
+        end_at: '2025-08-05T23:30:00',
+        timezone: 'Asia/Seoul',
+      }),
+    onSuccess: (res) => setJobId(res.job_id),
+  });
+
+  const statusQ = useQuery({
+    queryKey: ['export-status', jobId],
+    queryFn: () => getExportStatus(jobId!),
+    enabled: !!jobId,
+    refetchInterval: 2000,
+  });
+
+  const isDone = statusQ.data?.status === 'completed' || statusQ.data?.status === 'failed';
+
+  return (
+    <div>
+      <button onClick={() => createMut.mutate()} disabled={createMut.isPending || (!!jobId && !isDone)}>
+        {createMut.isPending ? '요청 중…' : '메시지 수집 시작'}
+      </button>
+
+      {jobId && (
+        <div style={{ marginTop: 12 }}>
+          <div>job_id: {jobId}</div>
+          {statusQ.isLoading && <div>상태 조회 중…</div>}
+          {statusQ.data && (
+            <pre style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(statusQ.data, null, 2)}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+### 타임존 전송 예시(KST)
+```ts
+await createExport({
+  start_at: '2025-08-05T22:30:00',
+  end_at: '2025-08-05T23:30:00',
+  timezone: 'Asia/Seoul',
+});
+```
+
+### 에러/경계 상황 UX 권장
+- 429(rate_limited): “요청이 많습니다. 잠시 후 다시 시도해주세요.”
+- 500(Server not configured…): 운영자에게 문의(환경변수 확인 필요)
+- failed + integrity_mismatch: “이미 저장된 메시지가 있어 신규 삽입이 없었습니다.”(추출 자체는 성공일 수 있음)
+
+### 연동 플로우 요약
+- 버튼 클릭 → `POST /exports` 또는 `POST /exports?wait=true`
+- 즉시 완료 응답을 원하면 wait=true, 오래 걸리면 timeout 시 `job_id`로 전환
+- 백그라운드 처리 시에는 `job_id`를 받아 2초 간격 등으로 `GET /exports/{job_id}` 폴링
+- 결과 `status`와 카운트(`message_count`, `inserted_count`)를 사용자에게 표시
+
+---
+
 ## 문의
 문서로 해결되지 않는 문제가 있다면 이 저장소 이슈 또는 운영자에게 문의해주세요.
